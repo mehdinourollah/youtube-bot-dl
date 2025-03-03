@@ -1,5 +1,5 @@
 import telegram
-from telegram.ext import Updater, CommandHandler, MessageHandler, Filters
+from telegram.ext import Application, CommandHandler, MessageHandler, filters
 import subprocess
 import os
 import requests
@@ -7,18 +7,18 @@ import requests
 TOKEN = os.getenv('TELEGRAM_TOKEN')
 SUPPORTED_PLATFORMS = ['twitter.com', 'x.com', 'youtube.com', 'youtu.be', 'instagram.com', 'tiktok.com']
 
-def start(update, context):
-    update.message.reply_text('Send me a video URL from Twitter, YouTube, Instagram, TikTok, etc.!')
+async def start(update, context):
+    await context.bot.send_message(chat_id=update.effective_chat.id, text='Send me a video URL from Twitter, YouTube, Instagram, TikTok, etc.!')
 
-def handle_message(update, context):
-    chat_id = update.message.chat_id
+async def handle_message(update, context):
+    chat_id = update.effective_chat.id
     text = update.message.text
 
     if not any(platform in text for platform in SUPPORTED_PLATFORMS):
-        update.message.reply_text('Please send a valid video URL from a supported platform.')
+        await context.bot.send_message(chat_id=chat_id, text='Please send a valid video URL from a supported platform.')
         return
 
-    update.message.reply_text('Downloading your video, please wait...')
+    await context.bot.send_message(chat_id=chat_id, text='Downloading your video, please wait...')
     try:
         result = subprocess.run(['yt-dlp', '-g', '-f', 'bestvideo+bestaudio/best', text], 
                               capture_output=True, text=True, check=True)
@@ -29,23 +29,23 @@ def handle_message(update, context):
         response = requests.head(video_url)
         size = int(response.headers.get('content-length', 0))
         if size > 50 * 1024 * 1024:
-            update.message.reply_text('Video exceeds 50 MB. Use a smaller video or try another URL.')
+            await context.bot.send_message(chat_id=chat_id, text='Video exceeds 50 MB. Use a smaller video or try another URL.')
         else:
-            update.message.reply_video(video_url)
-            update.message.reply_text('Here’s your video!')
+            await context.bot.send_video(chat_id=chat_id, video=video_url)
+            await context.bot.send_message(chat_id=chat_id, text='Here’s your video!')
     except subprocess.CalledProcessError as e:
-        update.message.reply_text(f'Error downloading video: {e.stderr.strip()}')
+        await context.bot.send_message(chat_id=chat_id, text=f'Error downloading video: {e.stderr.strip()}')
     except Exception as e:
-        update.message.reply_text(f'Sorry, I couldn’t download the video: {str(e)}. Check the URL and try again.')
+        await context.bot.send_message(chat_id=chat_id, text=f'Sorry, I couldn’t download the video: {str(e)}. Check the URL and try again.')
 
 def main():
-    updater = Updater(TOKEN, use_context=True)
-    dp = updater.dispatcher
-    dp.add_handler(CommandHandler("start", start))
-    dp.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_message))
-    updater.start_polling()
+    if not TOKEN:
+        raise ValueError("TELEGRAM_TOKEN not set")
+    application = Application.builder().token(TOKEN).build()
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     print('Bot is running...')
-    updater.idle()
+    application.run_polling()
 
 if __name__ == '__main__':
     main()
