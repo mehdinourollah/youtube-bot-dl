@@ -1,0 +1,6 @@
+.venv
+.env
+downloads
+cookie.txt
+*.session
+*.log*

@@ -1,51 +1,68 @@
-import telegram
-from telegram.ext import Application, CommandHandler, MessageHandler, filters
-import subprocess
 import os
-import requests
+from pyrogram import Client, filters
+import yt_dlp
 
-TOKEN = os.getenv('TELEGRAM_TOKEN')
-SUPPORTED_PLATFORMS = ['twitter.com', 'x.com', 'youtube.com', 'youtu.be', 'instagram.com', 'tiktok.com']
+# Replace these with your actual credentials
+API_ID = os.getenv('API_ID')
+API_HASH = os.getenv('API_HASH')
+TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
 
-async def start(update, context):
-    await context.bot.send_message(chat_id=update.effective_chat.id, text='Send me a video URL from Twitter, YouTube, Instagram, TikTok, etc.!')
+# Initialize the bot
+app = Client("my_bot", api_id=API_ID, api_hash=API_HASH, bot_token=TELEGRAM_TOKEN)
 
-async def handle_message(update, context):
-    chat_id = update.effective_chat.id
-    text = update.message.text
+# Handler for text messages
+@app.on_message(filters.text)
+async def handle_message(client, message):
+    url = message.text.strip()
+    
+    # Check if the URL is from YouTube or Twitter
+    if any(domain in url for domain in ["youtube.com", "youtu.be", "twitter.com", "x.com"]):
+        # Send initial feedback
+        status_msg = await message.reply("Processing your request...")
 
-    if not any(platform in text for platform in SUPPORTED_PLATFORMS):
-        await context.bot.send_message(chat_id=chat_id, text='Please send a valid video URL from a supported platform.')
-        return
+        try:
+            # Step 1: Download the video with yt-dlp
+            ydl_opts = {
+                'outtmpl': 'downloads/%(id)s.%(ext)s',  # Save to downloads folder
+                'format': 'bestvideo[vcodec^=avc1]+bestaudio[acodec^=mp4a]/best',  # Prioritize H.264 and AAC
+                'merge_output_format': 'mp4',           # Ensure output is mp4 for Telegram compatibility
+                'quiet': False,                          # Suppress yt-dlp output
+                # 'cookiefile': 'cookie.txt',            # Use cookies.txt for YouTube login
+            }
+            
+            # Create downloads directory if it doesn't exist
+            os.makedirs("downloads", exist_ok=True)
+            
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                await status_msg.edit("Downloading video...")
+                info = ydl.extract_info(url, download=True)
+                file_name = ydl.prepare_filename(info)
+                # Ensure the file has the correct extension after merging
+                file_name = file_name.rsplit('.', 1)[0] + '.mp4'
 
-    await context.bot.send_message(chat_id=chat_id, text='Downloading your video, please wait...')
-    try:
-        result = subprocess.run(['yt-dlp', '-g', '-f', 'bestvideo+bestaudio/best', text], 
-                              capture_output=True, text=True, check=True)
-        video_url = result.stdout.strip().split('\n')[0]
-        if not video_url:
-            raise ValueError('No video URL found')
+            # Step 2: Check file size
+            file_size = os.path.getsize(file_name) / (1024 * 1024)  # Size in MB
+            await status_msg.edit(f"Uploading video ({file_size:.2f} MB)...")
 
-        response = requests.head(video_url)
-        size = int(response.headers.get('content-length', 0))
-        if size > 50 * 1024 * 1024:
-            await context.bot.send_message(chat_id=chat_id, text='Video exceeds 50 MB. Use a smaller video or try another URL.')
-        else:
-            await context.bot.send_video(chat_id=chat_id, video=video_url)
-            await context.bot.send_message(chat_id=chat_id, text='Here’s your video!')
-    except subprocess.CalledProcessError as e:
-        await context.bot.send_message(chat_id=chat_id, text=f'Error downloading video: {e.stderr.strip()}')
-    except Exception as e:
-        await context.bot.send_message(chat_id=chat_id, text=f'Sorry, I couldn’t download the video: {str(e)}. Check the URL and try again.')
+            # Step 3: Send the video
+            if file_size <= 2000:  # Telegram's limit is 2GB (2000MB)
+                await client.send_video(
+                    chat_id=message.chat.id,
+                    video=file_name,
+                    supports_streaming=True,  # Enable streaming in Telegram
+                )
+            else:
+                await status_msg.edit("Error: Video exceeds Telegram's 2GB limit.")
 
-def main():
-    if not TOKEN:
-        raise ValueError("TELEGRAM_TOKEN not set")
-    application = Application.builder().token(TOKEN).build()
-    application.add_handler(CommandHandler("start", start))
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-    print('Bot is running...')
-    application.run_polling()
+            # Step 4: Clean up
+            os.remove(file_name)
+            await status_msg.delete()
 
-if __name__ == '__main__':
-    main()
+        except Exception as e:
+            await status_msg.edit(f"Error: {str(e)}")
+    else:
+        await message.reply("Please send a valid YouTube or Twitter link.")
+
+# Run the bot
+print("Bot is running...")
+app.run()

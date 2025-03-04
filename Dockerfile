@@ -2,9 +2,13 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
-RUN apt-get update && apt-get install -y ffmpeg && rm -rf /var/lib/apt/lists/*
-RUN pip install --no-cache-dir python-telegram-bot==20.8 yt-dlp requests
+COPY requirements.txt .
 
-COPY bot.py .
+RUN apt-get update && apt-get install -y ffmpeg && rm -rf /var/lib/apt/lists/*
+RUN python -m venv venv && \
+    ./venv/bin/pip install --upgrade pip && \
+    ./venv/bin/pip install -r requirements.txt
+
+COPY . .
 
 CMD ["python", "bot.py"]
