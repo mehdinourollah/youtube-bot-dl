@@ -2,5 +2,7 @@
 .env
 downloads
 cookie.txt
-*.session
+*.session*
+*.pem
 *.log*
+*.txt
