@@ -69,8 +69,11 @@ jobs:
           script: |
             set -e
             cd /home/${{ secrets.VPS_USER }}/telegram-bot
+            echo "Checking deploy.sh permissions"
+            ls -la deploy.sh
             echo "Making deploy.sh executable"
             chmod +x deploy.sh
+            echo "Permissions after chmod:"
             ls -la deploy.sh
             echo "Running deploy.sh"
             ./deploy.sh || { echo "deploy.sh failed with exit code $?"; exit 1; }
