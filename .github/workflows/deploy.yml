@@ -12,34 +12,39 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v3
 
+      - name: Setup SSH
+        uses: webfactory/ssh-agent@v0.7.0
+        with:
+          ssh-private-key: ${{ secrets.SSH_KEY }}
+
+      - name: Copy files to VPS
+        uses: appleboy/scp-action@v0.1.4
+        with:
+          host: ${{ secrets.VPS_IP }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          source: "."
+          target: "/home/${{ secrets.VPS_USER }}/telegram-bot"
+
       - name: Deploy to VPS
-        env:
-          VPS_IP: ${{ secrets.VPS_IP }}
-          VPS_USER: ${{ secrets.VPS_USER }}
-          SSH_KEY: ${{ secrets.SSH_KEY }}
-        run: |
-          # Save SSH key to a file
-          echo "$SSH_KEY" > ssh_key.pem
-          chmod 600 ssh_key.pem
-
-          # Copy files to VPS
-          scp -i ssh_key.pem -r . $VPS_USER@$VPS_IP:/home/$VPS_USER/telegram-bot
-
-          # SSH into VPS and deploy
-          ssh -i ssh_key.pem $VPS_USER@$VPS_IP << 'EOF'
-            cd /home/$VPS_USER/telegram-bot
+        uses: appleboy/ssh-action@v1.0.0
+        with:
+          host: ${{ secrets.VPS_IP }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          script: |
+            cd /home/${{ secrets.VPS_USER }}/telegram-bot
+            
             # Stop any running bot instance
             pkill -f "python3 bot.py" || true
-            # Set environment variables
+            
+            # Create .env file
             echo "API_ID=${{ secrets.API_ID }}" > .env
             echo "API_HASH=${{ secrets.API_HASH }}" >> .env
             echo "BOT_TOKEN=${{ secrets.BOT_TOKEN }}" >> .env
             echo "COOKIE_FILE=youtube_cookies.txt" >> .env
             chmod 600 .env
-            # Run deployment script
+            
+            # Run deployment
             chmod +x deploy.sh
             ./deploy.sh
-          EOF
-
-          # Clean up
-          rm ssh_key.pem
