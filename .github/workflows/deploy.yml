@@ -26,13 +26,16 @@ jobs:
           source: "."
           target: "/home/${{ secrets.VPS_USER }}/telegram-bot"
 
-      - name: Deploy to VPS
+      - name: Configure and Deploy to VPS
         uses: appleboy/ssh-action@v1.0.0
         with:
           host: ${{ secrets.VPS_IP }}
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.SSH_KEY }}
+          timeout: 10m  # Increased timeout for longer operations
+          command_timeout: 10m  # Timeout for individual commands
           script: |
+            set -e
             cd /home/${{ secrets.VPS_USER }}/telegram-bot
             
             # Stop any running bot instance
@@ -45,6 +48,10 @@ jobs:
             echo "COOKIE_FILE=youtube_cookies.txt" >> .env
             chmod 600 .env
             
-            # Run deployment
+            # Make deploy script executable
             chmod +x deploy.sh
-            ./deploy.sh
+            
+            # Run deployment script with error handling
+            echo "Starting deployment..."
+            ./deploy.sh || { echo "Deployment failed"; exit 1; }
+            echo "Deployment completed successfully"
