@@ -34,6 +34,7 @@ jobs:
           key: ${{ secrets.SSH_KEY }}
           timeout: 10m  # Increased timeout for longer operations
           command_timeout: 10m  # Timeout for individual commands
+          debug: true
           script: |
             set -e
             cd /home/${{ secrets.VPS_USER }}/telegram-bot
