@@ -6,3 +6,4 @@ cookie.txt
 *.pem
 *.log*
 *.txt
+user_cookies/
