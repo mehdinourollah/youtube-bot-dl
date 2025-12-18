@@ -1,66 +1,59 @@
-# 🎥 Universal Video Grabber Bot
+# YouTube Downloader Telegram Bot
 
-> A sleek Telegram bot that fetches videos from your favorite social platforms with style.
+A reliable Telegram bot that downloads YouTube videos and sends them back to the user. Built with Python, `aiogram`, and `yt-dlp`. Dockerized for easy deployment on any VPS.
 
-## ✨ Features
+## Prerequisites
 
-- 🚀 Lightning-fast video downloads
-- 🎯 Supports multiple platforms:
-  - Twitter/X
-  - YouTube
-  - Instagram
-  - TikTok
-- 🔄 Automatic format selection
-- 📱 Direct delivery to Telegram
-- 🛡️ Size limit protection (50MB)
+1.  **Telegram Bot Token**: Get one from [@BotFather](https://t.me/BotFather) on Telegram.
+2.  **Docker** (Recommended) OR **Python 3.11+** installed.
 
-## 🛠️ Tech Stack
+## Quick Start (Docker) - Recommended
 
-- Python 3.12
-- python-telegram-bot
-- yt-dlp
-- Docker
-- GitHub Actions
+1.  Create a file named `.env` in this directory:
+    ```env
+    TELEGRAM_TOKEN=your_token_here
+    ```
 
-## 🚀 Deployment
+2.  Build the image:
+    ```bash
+    docker build -t ytbot .
+    ```
 
-The bot automatically deploys to your VPS via GitHub Actions when you push to the main branch.
+3.  Run the container:
+    ```bash
+    docker run -d --env-file .env --name my-yt-bot ytbot
+    ```
 
-### 🔑 Required Secrets
+## Local Development (Python)
 
-```bash
-TELEGRAM_TOKEN      # Your Telegram Bot Token
-DOCKER_USERNAME     # Docker Hub Username
-DOCKER_TOKEN        # Docker Hub Access Token
-VPS_HOST           # Your VPS IP/Domain
-VPS_USERNAME       # VPS SSH Username
-VPS_SSH_KEY        # VPS SSH Private Key
-```
+1.  Install system dependencies (`ffmpeg`):
+    - **Mac**: `brew install ffmpeg`
+    - **Linux**: `sudo apt install ffmpeg`
+    - **Windows**: Download and add to PATH.
 
-## 🏃‍♂️ Local Development
+2.  Install Python dependencies:
+    ```bash
+    pip install -r requirements.txt
+    ```
 
-1. Clone the repository
-2. Build the Docker image:
-   ```bash
-   docker build -t video-grabber-bot .
-   ```
-3. Run the container:
-   ```bash
-   docker run -e TELEGRAM_TOKEN=your_token video-grabber-bot
-   ```
+3.  Set your token in `.env` (or export as variable):
+    ```bash
+    export TELEGRAM_TOKEN=your_token_here
+    ```
 
-## 📝 Usage
+4.  Run the bot:
+    ```bash
+    python bot.py
+    ```
 
-1. Start a chat with the bot
-2. Send a video URL from any supported platform
-3. Wait for your video to arrive!
+## Features
 
-## ⚠️ Limitations
+-   Downloads YouTube videos using `yt-dlp` (highest reliability).
+-   Tries to select video quality < 50MB (Telegram's bot API limit).
+-   Sends video file directly to chat.
 
-- Maximum video size: 50MB
-- Supported platforms: Twitter/X, YouTube, Instagram, TikTok
-- Some platform restrictions may apply
+## Deploying to a VPS
 
-## 📜 License
-
-MIT License - Feel free to use and modify!
+Since this is Dockerized, you can deploy it to any provider:
+-   **DigitalOcean / Linode / Hetzner**: Rent a small VPS ($5/mo), install Docker, and run the commands above.
+-   **Railway / Fly.io**: Connect your GitHub repo and let them build the Dockerfile automatically.

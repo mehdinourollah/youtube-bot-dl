@@ -1,51 +1,125 @@
-import telegram
-from telegram.ext import Application, CommandHandler, MessageHandler, filters
-import subprocess
+import asyncio
+import logging
 import os
-import requests
+import shutil
+import uuid
+from aiogram import Bot, Dispatcher, types, F
+from aiogram.filters import Command
+from aiogram.types import FSInputFile
+from dotenv import load_dotenv
+import yt_dlp
 
-TOKEN = os.getenv('TELEGRAM_TOKEN')
-SUPPORTED_PLATFORMS = ['twitter.com', 'x.com', 'youtube.com', 'youtu.be', 'instagram.com', 'tiktok.com']
+# Load environment variables
+load_dotenv()
 
-async def start(update, context):
-    await context.bot.send_message(chat_id=update.effective_chat.id, text='Send me a video URL from Twitter, YouTube, Instagram, TikTok, etc.!')
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-async def handle_message(update, context):
-    chat_id = update.effective_chat.id
-    text = update.message.text
+# Get API Token
+API_TOKEN = os.getenv("TELEGRAM_TOKEN")
 
-    if not any(platform in text for platform in SUPPORTED_PLATFORMS):
-        await context.bot.send_message(chat_id=chat_id, text='Please send a valid video URL from a supported platform.')
-        return
+# Check if token is present
+if not API_TOKEN:
+    logger.error("No TELEGRAM_TOKEN found in environment variables. Please set it in .env")
+    exit(1)
 
-    await context.bot.send_message(chat_id=chat_id, text='Downloading your video, please wait...')
+# Initialize Bot and Dispatcher
+bot = Bot(token=API_TOKEN)
+dp = Dispatcher()
+
+DOWNLOAD_DIR = "downloads"
+
+# Ensure download directory exists
+if not os.path.exists(DOWNLOAD_DIR):
+    os.makedirs(DOWNLOAD_DIR)
+
+@dp.message(Command("start"))
+async def cmd_start(message: types.Message):
+    """
+    This handler will be called when user sends `/start` command
+    """
+    await message.answer("👋 Hi! I'm a reliable YouTube Downloader Bot.\n\n"
+                         "Send me a YouTube link, and I will try to download and send it to you.")
+
+@dp.message(F.text)
+async def handle_message(message: types.Message):
+    """
+    This handler will be called when user sends a text message (presumably a link)
+    """
+    url = message.text.strip()
+    
+    status_msg = await message.answer("🔍 Processing your link...")
+    
+    # Create a unique folder for this download to avoid collisions
+    task_id = str(uuid.uuid4())
+    task_dir = os.path.join(DOWNLOAD_DIR, task_id)
+    os.makedirs(task_dir, exist_ok=True)
+    
     try:
-        result = subprocess.run(['yt-dlp', '-g', '-f', 'bestvideo+bestaudio/best', text], 
-                              capture_output=True, text=True, check=True)
-        video_url = result.stdout.strip().split('\n')[0]
-        if not video_url:
-            raise ValueError('No video URL found')
-
-        response = requests.head(video_url)
-        size = int(response.headers.get('content-length', 0))
-        if size > 50 * 1024 * 1024:
-            await context.bot.send_message(chat_id=chat_id, text='Video exceeds 50 MB. Use a smaller video or try another URL.')
+        ydl_opts = {
+            'format': 'best[ext=mp4][filesize<50M]/best[ext=mp4]/best', # Prioritize small enough files, otherwise just best
+            'outtmpl': os.path.join(task_dir, '%(title)s.%(ext)s'),
+            'quiet': True,
+            'no_warnings': True,
+        }
+        
+        await bot.edit_message_text("⬇️ Downloading video...", chat_id=message.chat.id, message_id=status_msg.message_id)
+        
+        # Run yt-dlp in a separate thread to not block the bot
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(None, download_video, ydl_opts, url)
+        
+        # Find the downloaded file
+        files = os.listdir(task_dir)
+        if not files:
+            await bot.edit_message_text("❌ Failed to download video: No file found.", chat_id=message.chat.id, message_id=status_msg.message_id)
+            return
+            
+        video_path = os.path.join(task_dir, files[0])
+        file_size = os.path.getsize(video_path)
+        
+        # Telegram Bot API Limit is 50MB
+        if file_size > 50 * 1024 * 1024:
+             await bot.edit_message_text(f"⚠️ Video is too large ({file_size / (1024*1024):.2f} MB). I can only send up to 50MB directly.", chat_id=message.chat.id, message_id=status_msg.message_id)
         else:
-            await context.bot.send_video(chat_id=chat_id, video=video_url)
-            await context.bot.send_message(chat_id=chat_id, text='Here’s your video!')
-    except subprocess.CalledProcessError as e:
-        await context.bot.send_message(chat_id=chat_id, text=f'Error downloading video: {e.stderr.strip()}')
+            await bot.edit_message_text("⬆️ Uploading to Telegram...", chat_id=message.chat.id, message_id=status_msg.message_id)
+            video_file = FSInputFile(video_path)
+            await message.reply_video(video_file, caption="Here is your video! 🎥")
+            await bot.delete_message(chat_id=message.chat.id, message_id=status_msg.message_id)
+
     except Exception as e:
-        await context.bot.send_message(chat_id=chat_id, text=f'Sorry, I couldn’t download the video: {str(e)}. Check the URL and try again.')
+        logger.error(f"Error processing url {url}: {e}")
+        await bot.edit_message_text(f"❌ Error occurred: {str(e)}", chat_id=message.chat.id, message_id=status_msg.message_id)
+    finally:
+        # Cleanup
+        if os.path.exists(task_dir):
+            shutil.rmtree(task_dir)
 
-def main():
-    if not TOKEN:
-        raise ValueError("TELEGRAM_TOKEN not set")
-    application = Application.builder().token(TOKEN).build()
-    application.add_handler(CommandHandler("start", start))
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-    print('Bot is running...')
-    application.run_polling()
+def download_video(opts, url):
+    with yt_dlp.YoutubeDL(opts) as ydl:
+        ydl.download([url])
 
-if __name__ == '__main__':
-    main()
+async def cleanup_downloads():
+    """
+    Cleans up the valid download directory on startup.
+    """
+    if os.path.exists(DOWNLOAD_DIR):
+        logger.info(f"Cleaning up {DOWNLOAD_DIR}...")
+        try:
+            for item in os.listdir(DOWNLOAD_DIR):
+                item_path = os.path.join(DOWNLOAD_DIR, item)
+                if os.path.isdir(item_path):
+                    shutil.rmtree(item_path)
+                else:
+                    os.remove(item_path)
+            logger.info("Cleanup complete.")
+        except Exception as e:
+            logger.error(f"Error during cleanup: {e}")
+
+async def main():
+    await cleanup_downloads()
+    await dp.start_polling(bot)
+
+if __name__ == "__main__":
+    asyncio.run(main())
