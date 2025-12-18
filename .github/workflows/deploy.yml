@@ -1,41 +1,80 @@
-name: Deploy Telegram Bot to VPS
+name: Deploy to Oracle VPS
 
 on:
   push:
-    branches: [main]
-  workflow_dispatch:
+    branches:
+      - main
 
 jobs:
-  build-and-deploy:
+  deploy:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v3
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Login to Docker Hub
-        uses: docker/login-action@v3
+      - name: Setup SSH
+        uses: webfactory/ssh-agent@v0.7.0
         with:
-          username: ${{ secrets.DOCKER_USERNAME }}
-          password: ${{ secrets.DOCKER_TOKEN }}  # Use token instead of password
+          ssh-private-key: ${{ secrets.SSH_KEY }}
 
-      - name: Build and Push Docker Image
-        uses: docker/build-push-action@v5
+      - name: Copy files to VPS
+        uses: appleboy/scp-action@v0.1.4
         with:
-          context: .
-          push: true
-          tags: ${{ secrets.DOCKER_USERNAME }}/telegram-bot:latest
+          host: ${{ secrets.VPS_IP }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          source: "."
+          target: "/home/${{ secrets.VPS_USER }}/telegram-bot"
 
-      - name: Deploy to VPS
-        uses: appleboy/ssh-action@v1.0.3
+      - name: Test SSH Connectivity
+        uses: appleboy/ssh-action@v1.0.0
         with:
-          host: ${{ secrets.VPS_HOST }}
-          username: ${{ secrets.VPS_USERNAME }}
-          key: ${{ secrets.VPS_SSH_KEY }}
+          host: ${{ secrets.VPS_IP }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          timeout: 2m
           script: |
-            docker pull ${{ secrets.DOCKER_USERNAME }}/telegram-bot:latest
-            docker stop telegram-bot || true
-            docker rm telegram-bot || true
-            docker run -d --name telegram-bot --restart unless-stopped -e TELEGRAM_TOKEN=${{ secrets.TELEGRAM_TOKEN }} ${{ secrets.DOCKER_USERNAME }}/telegram-bot:latest
+            echo "SSH connection successful"
+            whoami
+            pwd
+
+      - name: Configure Environment
+        uses: appleboy/ssh-action@v1.0.0
+        with:
+          host: ${{ secrets.VPS_IP }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          timeout: 2m
+          script: |
+            set -e
+            cd /home/${{ secrets.VPS_USER }}/telegram-bot
+            echo "In directory: $(pwd)"
+            pkill -f "python3 bot.py" || echo "No bot process found"
+            echo "Creating .env file"
+            echo "API_ID=${{ secrets.API_ID }}" > .env
+            echo "API_HASH=${{ secrets.API_HASH }}" >> .env
+            echo "BOT_TOKEN=${{ secrets.BOT_TOKEN }}" >> .env
+            echo "COOKIE_FILE=youtube_cookies.txt" >> .env
+            chmod 600 .env
+            ls -la .env
+
+      - name: Run Deployment Script
+        uses: appleboy/ssh-action@v1.0.0
+        with:
+          host: ${{ secrets.VPS_IP }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          timeout: 10m
+          debug: true
+          script: |
+            set -e
+            cd /home/${{ secrets.VPS_USER }}/telegram-bot
+            echo "Checking deploy.sh permissions"
+            ls -la deploy.sh
+            echo "Making deploy.sh executable"
+            chmod +x deploy.sh
+            echo "Permissions after chmod:"
+            ls -la deploy.sh
+            echo "Running deploy.sh"
+            ./deploy.sh || { echo "deploy.sh failed with exit code $?"; exit 1; }
+            echo "Deployment completed"
