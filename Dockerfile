@@ -1,5 +1,6 @@
 # Use an official Python runtime as a parent image
-FROM python:3.11-slim
+# Use specific stable version to avoid unstable/rolling updates (e.g., Trixie)
+FROM python:3.11-slim-bookworm
 
 # Set environment variables
 ENV PYTHONDONTWRITEBYTECODE=1
