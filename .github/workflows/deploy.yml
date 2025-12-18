@@ -90,7 +90,7 @@ jobs:
               --network telegram-net \
               --restart unless-stopped \
               -e BOT_TOKEN="${{ secrets.BOT_TOKEN }}" \
-              -e BOT_API_URL="http://local-bot-api:8081/bot" \
+              -e BOT_API_URL="http://local-bot-api:8081" \
               -v telegram_bot_api_data:/var/lib/telegram-bot-api \
               ghcr.io/${{ env.IMAGE_NAME }}:latest
             

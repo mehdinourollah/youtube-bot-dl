@@ -38,6 +38,8 @@ if "api.telegram.org" not in BOT_API_URL:
         api=TelegramAPIServer.from_base(BOT_API_URL)
     )
 
+logger.info(f"Bot initialized with API URL: {BOT_API_URL}")
+
 bot = Bot(token=API_TOKEN, session=session)
 dp = Dispatcher()
 
