@@ -1,0 +1,31 @@
+version: '3.8'
+
+services:
+  telegram-bot-api:
+    image: aiogram/telegram-bot-api:latest
+    container_name: local-bot-api
+    environment:
+      - TELEGRAM_API_ID=${API_ID}
+      - TELEGRAM_API_HASH=${API_HASH}
+      - TELEGRAM_LOCAL=true
+    volumes:
+      - telegram_bot_api_data:/var/lib/telegram-bot-api
+    restart: unless-stopped
+    ports:
+      - "8081:8081"
+
+  bot:
+    image: ghcr.io/${GITHUB_REPOSITORY}:latest # Will be replaced by CI, or build: . for local
+    build: .
+    container_name: yt-downloader-bot
+    restart: unless-stopped
+    environment:
+      - BOT_TOKEN=${BOT_TOKEN}
+      - BOT_API_URL=http://telegram-bot-api:8081/bot
+    volumes:
+      - telegram_bot_api_data:/var/lib/telegram-bot-api # Shared volume for local file transfer (zero-copy)
+    depends_on:
+      - telegram-bot-api
+
+volumes:
+  telegram_bot_api_data:

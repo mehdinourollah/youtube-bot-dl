@@ -1,80 +1,98 @@
-name: Deploy to Oracle VPS
+name: Deploy Bot
 
 on:
   push:
-    branches:
-      - main
+    branches: [ "main" ]
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
 
 jobs:
-  deploy:
+  build-and-push:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
     steps:
-      - name: Checkout code
+      - name: Checkout repository
         uses: actions/checkout@v3
 
-      - name: Setup SSH
-        uses: webfactory/ssh-agent@v0.7.0
+      - name: Log in to the Container registry
+        uses: docker/login-action@v2
         with:
-          ssh-private-key: ${{ secrets.SSH_KEY }}
+          registry: ${{ env.REGISTRY }}
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_TOKEN }}
 
-      - name: Copy files to VPS
-        uses: appleboy/scp-action@v0.1.4
+      - name: Extract metadata (tags, labels) for Docker
+        id: meta
+        uses: docker/metadata-action@v4
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=latest
+            type=sha
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v4
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+
+  deploy:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy to VPS
+        uses: appleboy/ssh-action@v0.1.10
         with:
           host: ${{ secrets.VPS_IP }}
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.SSH_KEY }}
-          source: "."
-          target: "/home/${{ secrets.VPS_USER }}/telegram-bot"
-
-      - name: Test SSH Connectivity
-        uses: appleboy/ssh-action@v1.0.0
-        with:
-          host: ${{ secrets.VPS_IP }}
-          username: ${{ secrets.VPS_USER }}
-          key: ${{ secrets.SSH_KEY }}
-          timeout: 2m
           script: |
-            echo "SSH connection successful"
-            whoami
-            pwd
+            # login to registry
+            echo "${{ secrets.DOCKER_TOKEN }}" | docker login ghcr.io -u ${{ secrets.DOCKER_USERNAME }} --password-stdin
 
-      - name: Configure Environment
-        uses: appleboy/ssh-action@v1.0.0
-        with:
-          host: ${{ secrets.VPS_IP }}
-          username: ${{ secrets.VPS_USER }}
-          key: ${{ secrets.SSH_KEY }}
-          timeout: 2m
-          script: |
-            set -e
-            cd /home/${{ secrets.VPS_USER }}/telegram-bot
-            echo "In directory: $(pwd)"
-            pkill -f "python3 bot.py" || echo "No bot process found"
-            echo "Creating .env file"
-            echo "API_ID=${{ secrets.API_ID }}" > .env
-            echo "API_HASH=${{ secrets.API_HASH }}" >> .env
-            echo "BOT_TOKEN=${{ secrets.BOT_TOKEN }}" >> .env
-            echo "COOKIE_FILE=youtube_cookies.txt" >> .env
-            chmod 600 .env
-            ls -la .env
+            # Create a folder for the project
+            mkdir -p ~/yt-downloader-bot
+            cd ~/yt-downloader-bot
 
-      - name: Run Deployment Script
-        uses: appleboy/ssh-action@v1.0.0
-        with:
-          host: ${{ secrets.VPS_IP }}
-          username: ${{ secrets.VPS_USER }}
-          key: ${{ secrets.SSH_KEY }}
-          timeout: 10m
-          debug: true
-          script: |
-            set -e
-            cd /home/${{ secrets.VPS_USER }}/telegram-bot
-            echo "Checking deploy.sh permissions"
-            ls -la deploy.sh
-            echo "Making deploy.sh executable"
-            chmod +x deploy.sh
-            echo "Permissions after chmod:"
-            ls -la deploy.sh
-            echo "Running deploy.sh"
-            ./deploy.sh || { echo "deploy.sh failed with exit code $?"; exit 1; }
-            echo "Deployment completed"
+            # 1. Network
+            docker network create telegram-net || true
+            
+            # 2. Local API Server
+            docker stop local-bot-api || true
+            docker rm local-bot-api || true
+            docker run -d \
+              --name local-bot-api \
+              --network telegram-net \
+              --restart unless-stopped \
+              -e TELEGRAM_API_ID="${{ secrets.API_ID }}" \
+              -e TELEGRAM_API_HASH="${{ secrets.API_HASH }}" \
+              -e TELEGRAM_LOCAL=true \
+              -v telegram_bot_api_data:/var/lib/telegram-bot-api \
+              aiogram/telegram-bot-api:latest
+
+            # 3. Bot
+            # pull new image
+            docker pull ghcr.io/${{ env.IMAGE_NAME }}:latest
+            
+            docker stop yt-downloader-bot || true
+            docker rm yt-downloader-bot || true
+            
+            docker run -d \
+              --name yt-downloader-bot \
+              --network telegram-net \
+              --restart unless-stopped \
+              -e BOT_TOKEN="${{ secrets.BOT_TOKEN }}" \
+              -e BOT_API_URL="http://local-bot-api:8081/bot" \
+              -v telegram_bot_api_data:/var/lib/telegram-bot-api \
+              ghcr.io/${{ env.IMAGE_NAME }}:latest
+            
+            # cleanup
+            docker image prune -f
